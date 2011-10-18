@@ -239,18 +239,6 @@ class PagedList(object):
     def __iter__(self):
         return PagedListIter(self)
 
-    def __getitem__(self,i):
-        try:
-            return self._results[i]
-        except IndexError:
-            if i < self._total:
-                while self.extend():
-                    try:
-                        return self._results[i]
-                    except IndexError:
-                        pass
-            raise IndexError
-
 class PagedListIter(object):
 
     def __init__(self,pagedlist):
