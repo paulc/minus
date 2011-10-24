@@ -1,5 +1,5 @@
 
-import cookielib,json,mimetools,mimetypes,optparse,sys,time,types,urllib,urllib2
+import cmd,cookielib,json,mimetools,mimetypes,optparse,os,shlex,sys,time,types,urllib,urllib2
 
 class MinusAPIError(Exception): pass
 
@@ -256,6 +256,123 @@ class PagedListIter(object):
         self.index += 1
         return result
 
+class MinusCLI(cmd.Cmd):
+
+    def connect(self,user):
+        self.user = user
+        self.root = user._folders
+        self.folder = None
+        self._set_prompt()
+
+    def _set_prompt(self):
+        self.prompt = "(Minus:%s) [/%s] : " % (self.user._username, self.folder and self.folder._name or "")
+
+    def do_pwd(self,line):
+        if self.folder:
+            print "Folder:", self.folder._name
+        else:
+            print "Folder: /"
+
+    def do_cd(self,line):
+        args = shlex.split(line)
+        if args:
+            new = self.user.find(args[0])
+            if new:
+                self.folder = new
+                print "--> CWD \"%s\" OK" % args[0]
+            else:
+                print "--> CWD \"%s\" FAILED" % args[0]
+        else:
+            self.folder = None
+        self._set_prompt()
+
+    def do_mkpublic(self,line):
+        for d in shlex.split(line):
+            new = self.user.new_folder(d,True)
+            print "--> MKPUBLIC \"%s\" OK" % new._name
+
+    def do_mkdir(self,line):
+        for d in shlex.split(line):
+            new = self.user.new_folder(d)
+            print "--> MKDIR \"%s\" OK" % new._name
+
+    def _pipe_write(self,cmd,data):
+        try:
+            pipe = os.popen(cmd,'w')
+            pipe.write(data)
+            pipe.close()
+        except IOError:
+            pass
+    
+    def _pipe_read(self,cmd):
+        try:
+            return os.popen(cmd)
+        except IOError:
+            pass
+
+    def do_put(self,line):
+        args = shlex.split(line)
+        if args:
+            try:
+                local = args[0]
+                if local.endswith("|"):
+                    f = self._pipe_read(local[:-1])
+                else:
+                    f = open(local)
+                if len(args) > 1: 
+                    remote = args[1]
+                else:
+                    remote = args[0]
+                new = self.folder.new(remote,f.read())
+                print "--> PUT \"%s\" OK" % new._name
+            except IOError,e:
+                print "Error opening local file: %s" % args[0]
+
+    def do_get(self,line):
+        args = shlex.split(line)
+        if args:
+            remote = self.folder.find(args[0])
+            if remote:
+                if len(args) > 1: 
+                    local = args[1]
+                else:
+                    local = args[0]
+                if local is "-":
+                    data = remote.data()
+                    if data.endswith("\n"):
+                        print data,
+                    else:
+                        print data
+                elif local.startswith("|"):
+                    self._pipe_write(local[1:],remote.data())
+                else:
+                    try:
+                        f = open(local,"w").write(remote.data())
+                        print "--> GET \"%s\" OK" % remote._name
+                    except IOError:
+                        print "--> GET \"%s\" FAILED (Can't write local file)" % remote
+            else:
+                print "--> GET \"%s\" FAILED (No such file)" % remote
+
+    def do_ls(self,line):
+        if self.folder:
+            print "%-32s %10s  %-20s %s" % ("Name","Size","Title","MIME Type")
+            print "-" * 80
+            for f in self.folder.files():
+                print "%-32s %10d  %-20s  %s" % (f._name,f._filesize,f._title or "-",f._mimetype or "-")
+        else:
+            print "%-32s %5s  %-19s  %7s  %s" % ("Folder","Files","Updated","Creator","Visibility")
+            print "-" * 80
+            for f in self.user.folders():
+                print "%-32s %5d  %19s  %-7s  %-7s" % (f._name,
+                                                    f._file_count,
+                                                    f._date_last_updated,
+                                                    f._creator.split('/')[-1],
+                                                    f._is_public and "public" or "private")
+
+    def do_EOF(self,line):
+        return True
+
 def encode_multipart_formdata(fields,files,mimetype=None):
     """
     Derived from - http://code.activestate.com/recipes/146306/
@@ -304,6 +421,7 @@ if __name__ == '__main__':
     minus = MinusAPI(options.debug)
     minus.authenticate(options.username,options.password,options.scope)
     user = minus.activeuser()
-    print user
-
+    cli = MinusCLI()
+    cli.connect(user)
+    cli.cmdloop()
 
