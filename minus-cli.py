@@ -1,5 +1,5 @@
 
-import cmd,cookielib,json,mimetools,mimetypes,optparse,os,shlex,sys,time,types,urllib,urllib2
+import cmd,cookielib,fnmatch,json,mimetools,mimetypes,optparse,os,shlex,sys,time,types,urllib,urllib2
 
 class MinusAPIError(Exception): pass
 
@@ -131,6 +131,13 @@ class MinusUser(object):
                 return MinusFolder(self.api,None,f)
         return None
 
+    def glob(self,pattern):
+        result = []
+        for f in self.api.list(self._folders):
+            if fnmatch.fnmatch(f['name'],pattern):
+                result.append(MinusFolder(self.api,None,f))
+        return result
+
     def followers(self):
         return [ MinusUser(self.api,None,u) for u in self.api.list("users/%s/followers" % self._slug) ]
 
@@ -176,6 +183,13 @@ class MinusFolder(object):
             if f['name'] == name:
                 return MinusFile(self.api,None,f)
         return None
+
+    def glob(self,pattern):
+        result = []
+        for f in self.api.list(self._files):
+            if fnmatch.fnmatch(f['name'],pattern):
+                result.append(MinusFile(self.api,None,f))
+        return result
 
     def new(self,filename,data,caption=None,mimetype=None):
         fields = [('filename',filename),('caption',caption)]
@@ -265,7 +279,8 @@ class MinusCLI(cmd.Cmd):
         self._set_prompt()
 
     def _set_prompt(self):
-        self.prompt = "(Minus:%s) [/%s] : " % (self.user._username, self.folder and self.folder._name or "")
+        self.prompt = "(Minus:%s) [/%s] : " % (self.user._username, 
+                                    self.folder and self.folder._name or "")
 
     def do_pwd(self,line):
         if self.folder:
@@ -323,52 +338,94 @@ class MinusCLI(cmd.Cmd):
                     remote = args[1]
                 else:
                     remote = args[0]
-                new = self.folder.new(remote,f.read())
-                print "--> PUT \"%s\" OK" % new._name
+                data = f.read()
+                new = self.folder.new(remote,data)
+                print "--> PUT \"%s\" OK (%d bytes)" % (new._name,len(data))
             except IOError,e:
                 print "Error opening local file: %s" % args[0]
 
     def do_get(self,line):
+        if self.folder:
+            args = shlex.split(line)
+            if args:
+                rname = args[0]
+                remote = self.folder.find(rname)
+                if remote:
+                    if len(args) > 1: 
+                        local = args[1]
+                    else:
+                        local = args[0]
+                    data = remote.data()
+                    if local is "-":
+                        if data.endswith("\n"):
+                            print data,
+                        else:
+                            print data
+                    elif local.startswith("|"):
+                        self._pipe_write(local[1:],data)
+                    else:
+                        try:
+                            f = open(local,"w").write(data)
+                            print "--> GET \"%s\" OK (%d bytes)" % (remote._name,len(data))
+                        except IOError:
+                            print "--> GET \"%s\" FAILED (Can't write local file)" % remote
+                else:
+                    print "--> GET \"%s\" FAILED (No such file)" % rname
+        else:
+            print "Error - Must be in folder"
+
+    def do_glob(self,line):
         args = shlex.split(line)
         if args:
-            remote = self.folder.find(args[0])
-            if remote:
-                if len(args) > 1: 
-                    local = args[1]
-                else:
-                    local = args[0]
-                if local is "-":
-                    data = remote.data()
-                    if data.endswith("\n"):
-                        print data,
-                    else:
-                        print data
-                elif local.startswith("|"):
-                    self._pipe_write(local[1:],remote.data())
-                else:
-                    try:
-                        f = open(local,"w").write(remote.data())
-                        print "--> GET \"%s\" OK" % remote._name
-                    except IOError:
-                        print "--> GET \"%s\" FAILED (Can't write local file)" % remote
+            pattern = args[0]
+        else:
+            pattern = '*'
+        if self.folder:
+            self._print_file_list(self.folder.glob(pattern))
+        else:
+            self._print_folder_list(self.user.glob(pattern))
+
+    def do_rm(self,line):
+        args = shlex.split(line)
+        if args:
+            rname = args[0]
+            if self.folder:
+                remote = self.folder.find(rname)
             else:
-                print "--> GET \"%s\" FAILED (No such file)" % remote
+                remote = self.user.find(rname)
+
+            if remote:
+                remote.delete()
+                print "--> DEL \"%s\" OK" % remote._name
+            else:
+                print "--> DEL \"%s\" FAILED (No such file/folder)" % rname
+        else:
+            print "Usage: rm <file|folder>"
 
     def do_ls(self,line):
         if self.folder:
-            print "%-32s %10s  %-20s %s" % ("Name","Size","Title","MIME Type")
-            print "-" * 80
-            for f in self.folder.files():
-                print "%-32s %10d  %-20s  %s" % (f._name,f._filesize,f._title or "-",f._mimetype or "-")
+            self._print_file_list(self.folder.files())
         else:
-            print "%-32s %5s  %-19s  %7s  %s" % ("Folder","Files","Updated","Creator","Visibility")
-            print "-" * 80
-            for f in self.user.folders():
-                print "%-32s %5d  %19s  %-7s  %-7s" % (f._name,
-                                                    f._file_count,
-                                                    f._date_last_updated,
-                                                    f._creator.split('/')[-1],
-                                                    f._is_public and "public" or "private")
+            self._print_folder_list(self.user.folders())
+
+    def _print_file_list(self,files):
+        print "%-28s  %-19s  %8s  %s" % ("Name","Uploaded","Size","Title")
+        print "-" * 80
+        for f in files:
+            print "%-28s  %-19s  %8d  %s" % (f._name,
+                                             f._uploaded, 
+                                             f._filesize,
+                                             f._title or "-")
+
+    def _print_folder_list(self,folders):
+        print "%-28s  %-19s  %5s  %7s  %s" % ("Folder","Updated","Files","Creator","Visibility")
+        print "-" * 80
+        for f in folders:
+            print "%-28s  %-19s  %5d  %-7s  %s" % (f._name,
+                                                   f._date_last_updated,
+                                                   f._file_count,
+                                                   f._creator.split('/')[-1],
+                                                   f._is_public and "public" or "private")
 
     def do_EOF(self,line):
         return True
