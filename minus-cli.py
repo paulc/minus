@@ -1,5 +1,5 @@
 
-import cmd,cookielib,fnmatch,json,mimetools,mimetypes,optparse,os,shlex,sys,time,types,urllib,urllib2
+import cmd,cookielib,fnmatch,glob,json,mimetools,mimetypes,optparse,os,shlex,sys,time,types,urllib,urllib2
 
 class MinusAPIError(Exception): pass
 
@@ -20,7 +20,7 @@ class MinusAPI(object):
         self.expires = 0
         self.force_https = True
 
-    def authenticate(self,username,password,scope='read_public'):
+    def authenticate(self,username,password,scope='read_public read_all upload_new modify_all modify_user'):
         form = { 'grant_type'    : 'password',
                  'scope'         : scope,
                  'client_id'     : self.API_KEY,
@@ -316,6 +316,18 @@ class MinusCLI(cmd.Cmd):
         else:
             print "Folder: /"
 
+    def do_lpwd(self,line):
+        print "Local Path:", os.getcwd()
+
+    def do_lcd(self,line):
+        args = shlex.split(line)
+        path = args[0]
+        try:
+            os.chdir(path)
+            print "Local Path:", os.getcwd()
+        except OSError:
+            print "ERROR: Unable to chdir to \"%s\"" % path
+
     def do_cd(self,line):
         args = shlex.split(line)
         folder = args[0]
@@ -341,6 +353,31 @@ class MinusCLI(cmd.Cmd):
         else:
             print "--> CWD \"%s\" FAILED" % folder
         
+    @folder_only
+    @wrap_api_error
+    def do_stat(self,line):
+        files = {}
+        for pattern in shlex.split(line):
+            for remote in self.folder.glob(pattern):
+                files[remote._id] = remote
+        if files:
+            for f in files.values():
+                print "--> STAT \"%s\"" % f._name
+                print
+                print "    Id          :", f._id
+                print "    Name        :", f._name
+                print "    Title       :", f._title
+                print "    Caption     :", f._caption
+                print "    Filesize    :", f._filesize
+                print "    MIME Type   :", f._mimetype
+                print "    Uploaded    :", f._uploaded
+                print "    URL         :", f._url
+                print "    URL (Raw)   :", f._url_rawfile
+                print "    URL (Thumb) :", f._url_thumbnail
+                print
+        else:
+            print "--> STAT - No files match"
+
     @root_only
     @wrap_api_error
     def do_mkpublic(self,line):
@@ -369,13 +406,14 @@ class MinusCLI(cmd.Cmd):
     @folder_only
     @wrap_api_error
     def do_del(self,line):
-        for f in shlex.split(line):
-            remote = self.folder.find(f)
-            if remote:
+        matches = 0
+        for pattern in shlex.split(line):
+            for remote in self.folder.glob(pattern):
+                matches += 1
                 remote.delete()
-                print "--> DEL \"%s\" OK" % f
-            else:
-                print "--> DEL \"%s\" FAILED (No such file)" % f
+                print "--> DEL \"%s\" OK" % remote._name
+        if matches == 0:
+                print "--> DEL FAILED (No files match)" 
 
     @folder_only
     @wrap_api_error
@@ -393,10 +431,11 @@ class MinusCLI(cmd.Cmd):
                 else:
                     remote = args[0]
                 data = f.read()
+                f.close()
                 new = self.folder.new(remote,data)
                 print "--> PUT \"%s\" OK (%d bytes)" % (new._name,len(data))
             except IOError,e:
-                print "Error opening local file: %s" % args[0]
+                print "--> PUT \"%s\" FAILED (Error opening local file: %s)" % (new._name,args[0])
 
     @folder_only
     @wrap_api_error
@@ -421,33 +460,70 @@ class MinusCLI(cmd.Cmd):
                         self._pipe_write(local[1:],data)
                     else:
                         try:
-                            f = open(local,"w").write(data)
+                            open(local,"w").write(data)
                             print "--> GET \"%s\" OK (%d bytes)" % (remote._name,len(data))
                         except IOError:
-                            print "--> GET \"%s\" FAILED (Can't write local file)" % remote
+                            print "--> GET \"%s\" FAILED (Can't write local file)" % remote._name
                 else:
                     print "--> GET \"%s\" FAILED (No such file)" % rname
         else:
             print "Error - Must be in folder"
 
+    @folder_only
     @wrap_api_error
-    def do_glob(self,line):
-        args = shlex.split(line)
-        if args:
-            pattern = args[0]
+    def do_mput(self,line):
+        files = set()
+        for pattern in shlex.split(line):
+            files.update(glob.glob(pattern))
+        if files:
+            for f in files:
+                if os.path.isfile(f):
+                    try:
+                        local = open(f)
+                        data = local.read()
+                        local.close()
+                        new = self.folder.new(os.path.basename(f),data)
+                        print "--> MPUT \"%s\" OK (%d bytes)" % (f,len(data))
+                    except IOError:
+                        print "--> MPUT \"%s\" FAILED (Error opening local file)" % f
         else:
-            pattern = '*'
-        if self.folder:
-            self._print_file_list(self.folder.glob(pattern))
+            print "--> MPUT FAILED (No files match)"
+
+    @folder_only
+    @wrap_api_error
+    def do_mget(self,line):
+        files = {}
+        for pattern in shlex.split(line):
+            for f in self.folder.glob(pattern):
+                files[f._name] = f
+        if files:
+            for name,remote in files.items():
+                try:
+                    data = remote.data()
+                    open(name,"w").write(data)
+                    print "--> MGET \"%s\" OK (%d bytes)" % (name,len(data))
+                except IOError:
+                    print "--> MGET \"%s\" FAILED (Can't write local file)" % name
         else:
-            self._print_folder_list(self.user.glob(pattern))
+            print "--> MGET FAILED (No files match)"
 
     @wrap_api_error
     def do_ls(self,line):
+        args = shlex.split(line)
+        result = {}
+        if not args:
+            args = ['*']
+        for pattern in args:
+            if self.folder:
+                for f in self.folder.glob(pattern):
+                    result[f._id] = f
+            else:
+                for f in self.user.glob(pattern):
+                    result[f._id] = f
         if self.folder:
-            self._print_file_list(self.folder.files())
+            self._print_file_list(result.values())
         else:
-            self._print_folder_list(self.user.folders())
+            self._print_folder_list(result.values())
 
     def do_EOF(self,line):
         return True
@@ -521,8 +597,7 @@ if __name__ == '__main__':
     parser = optparse.OptionParser(usage="Usage: %prog [options]")
     parser.add_option("--username",help="Minus.com username (required)")
     parser.add_option("--password",help="Minus.com password")
-    parser.add_option("--scope",default="read_public read_all upload_new modify_all modify_user",
-                                help="Application scope")
+    parser.add_option("--put",help="Upload files to folder (created if doesnt exist)")
     parser.add_option("--debug",action="store_true",help="Debug")
     parser.add_option("--shell",action="store_true",help="Drop into python interpreter")
     options,args = parser.parse_args()
@@ -532,7 +607,7 @@ if __name__ == '__main__':
     if options.password is None:
         options.password = getpass.getpass("Minus.com Password: ")
     minus = MinusAPI(options.debug)
-    minus.authenticate(options.username,options.password,options.scope)
+    minus.authenticate(options.username,options.password)
     user = minus.activeuser()
     if options.shell:
         import code
@@ -540,5 +615,13 @@ if __name__ == '__main__':
     else:
         cli = MinusCLI()
         cli.connect(user)
-        cli.cmdloop()
+        if options.put:
+            from subprocess import list2cmdline 
+            new = user.find(options.put)
+            if not new:
+                new = user.new_folder(options.put)
+            cli.folder = new
+            cli.do_mput(list2cmdline(args))
+        else:
+            cli.cmdloop()
 
