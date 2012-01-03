@@ -68,13 +68,16 @@ class MinusAPI(object):
     def request(self,url,data=None,method=None,content_type=None):
         if self.access_token is None:
             raise MinusAPIError('Not Authenticated')
-        r = urllib2.Request(self._url(url),data)
-        r.add_header('Authorization','Bearer %s' % self.access_token)
-        if content_type:
-            r.add_header('Content-Type',content_type)
-        if method:
-            r.get_method = lambda : method
-        return self.opener.open(r)
+        try:
+            r = urllib2.Request(self._url(url),data)
+            r.add_header('Authorization','Bearer %s' % self.access_token)
+            if content_type:
+                r.add_header('Content-Type',content_type)
+            if method:
+                r.get_method = lambda : method
+            return self.opener.open(r)
+        except urllib2.HTTPError,e:
+             raise MinusAPIError('Request HTTP Error: %d' % e.code)
 
     def upload(self,url,content_type,body):
         if self.access_token is None:
@@ -270,6 +273,31 @@ class PagedListIter(object):
         self.index += 1
         return result
 
+def wrap_api_error(f):
+    def wrapped(self,*args):
+        try:
+            result = f(self,*args)
+        except MinusAPIError,e:
+            print "ERROR: API Command Failed (%s)" % e.message
+    return wrapped
+
+def root_only(f):
+    def wrapped(self,*args):
+        if self.folder:
+            print "ERROR: Command only valid at root folder"
+        else:
+            result = f(self,*args)
+            return result
+    return wrapped
+
+def folder_only(f):
+    def wrapped(self,*args):
+        if not self.folder:
+            print "ERROR: Command only valid in sub-folder"
+        else:
+            return f(self,*args)
+    return wrapped
+
 class MinusCLI(cmd.Cmd):
 
     def connect(self,user):
@@ -290,41 +318,67 @@ class MinusCLI(cmd.Cmd):
 
     def do_cd(self,line):
         args = shlex.split(line)
-        if args:
-            new = self.user.find(args[0])
-            if new:
-                self.folder = new
-                print "--> CWD \"%s\" OK" % args[0]
+        folder = args[0]
+        if self.folder:
+            if folder == "..":
+                self.folder = None
             else:
-                print "--> CWD \"%s\" FAILED" % args[0]
+                if folder.startswith("../"):
+                    self.folder = None
+                    folder = folder[3:]
+                self._cd(folder)
         else:
-            self.folder = None
+            self._cd(args[0])
         self._set_prompt()
 
+    @root_only
+    @wrap_api_error
+    def _cd(self,folder):
+        new = self.user.find(folder)
+        if new:
+            self.folder = new
+            print "--> CWD \"%s\" OK" % folder
+        else:
+            print "--> CWD \"%s\" FAILED" % folder
+        
+    @root_only
+    @wrap_api_error
     def do_mkpublic(self,line):
         for d in shlex.split(line):
             new = self.user.new_folder(d,True)
             print "--> MKPUBLIC \"%s\" OK" % new._name
 
+    @root_only
+    @wrap_api_error
     def do_mkdir(self,line):
         for d in shlex.split(line):
             new = self.user.new_folder(d)
             print "--> MKDIR \"%s\" OK" % new._name
 
-    def _pipe_write(self,cmd,data):
-        try:
-            pipe = os.popen(cmd,'w')
-            pipe.write(data)
-            pipe.close()
-        except IOError:
-            pass
-    
-    def _pipe_read(self,cmd):
-        try:
-            return os.popen(cmd)
-        except IOError:
-            pass
+    @root_only
+    @wrap_api_error
+    def do_rmdir(self,line):
+        for d in shlex.split(line):
+            folder = self.user.find(d)
+            if folder:
+                folder.delete()
+                print "--> RMDIR \"%s\" OK" % d
+            else:
+                print "--> RMDIR \"%s\" FAILED (No such folder)" % d
 
+    @folder_only
+    @wrap_api_error
+    def do_del(self,line):
+        for f in shlex.split(line):
+            remote = self.folder.find(f)
+            if remote:
+                remote.delete()
+                print "--> DEL \"%s\" OK" % f
+            else:
+                print "--> DEL \"%s\" FAILED (No such file)" % f
+
+    @folder_only
+    @wrap_api_error
     def do_put(self,line):
         args = shlex.split(line)
         if args:
@@ -344,6 +398,8 @@ class MinusCLI(cmd.Cmd):
             except IOError,e:
                 print "Error opening local file: %s" % args[0]
 
+    @folder_only
+    @wrap_api_error
     def do_get(self,line):
         if self.folder:
             args = shlex.split(line)
@@ -374,6 +430,7 @@ class MinusCLI(cmd.Cmd):
         else:
             print "Error - Must be in folder"
 
+    @wrap_api_error
     def do_glob(self,line):
         args = shlex.split(line)
         if args:
@@ -385,28 +442,15 @@ class MinusCLI(cmd.Cmd):
         else:
             self._print_folder_list(self.user.glob(pattern))
 
-    def do_rm(self,line):
-        args = shlex.split(line)
-        if args:
-            rname = args[0]
-            if self.folder:
-                remote = self.folder.find(rname)
-            else:
-                remote = self.user.find(rname)
-
-            if remote:
-                remote.delete()
-                print "--> DEL \"%s\" OK" % remote._name
-            else:
-                print "--> DEL \"%s\" FAILED (No such file/folder)" % rname
-        else:
-            print "Usage: rm <file|folder>"
-
+    @wrap_api_error
     def do_ls(self,line):
         if self.folder:
             self._print_file_list(self.folder.files())
         else:
             self._print_folder_list(self.user.folders())
+
+    def do_EOF(self,line):
+        return True
 
     def _print_file_list(self,files):
         print "%-28s  %-19s  %8s  %s" % ("Name","Uploaded","Size","Title")
@@ -427,8 +471,19 @@ class MinusCLI(cmd.Cmd):
                                                    f._creator.split('/')[-1],
                                                    f._is_public and "public" or "private")
 
-    def do_EOF(self,line):
-        return True
+    def _pipe_write(self,cmd,data):
+        try:
+            pipe = os.popen(cmd,'w')
+            pipe.write(data)
+            pipe.close()
+        except IOError:
+            pass
+    
+    def _pipe_read(self,cmd):
+        try:
+            return os.popen(cmd)
+        except IOError:
+            pass
 
 def encode_multipart_formdata(fields,files,mimetype=None):
     """
@@ -469,6 +524,7 @@ if __name__ == '__main__':
     parser.add_option("--scope",default="read_public read_all upload_new modify_all modify_user",
                                 help="Application scope")
     parser.add_option("--debug",action="store_true",help="Debug")
+    parser.add_option("--shell",action="store_true",help="Drop into python interpreter")
     options,args = parser.parse_args()
     if options.username is None:
         parser.print_help()
@@ -478,7 +534,11 @@ if __name__ == '__main__':
     minus = MinusAPI(options.debug)
     minus.authenticate(options.username,options.password,options.scope)
     user = minus.activeuser()
-    cli = MinusCLI()
-    cli.connect(user)
-    cli.cmdloop()
+    if options.shell:
+        import code
+        code.interact(local=locals())
+    else:
+        cli = MinusCLI()
+        cli.connect(user)
+        cli.cmdloop()
 
