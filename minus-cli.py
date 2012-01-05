@@ -198,7 +198,7 @@ class MinusFolder(object):
         fields = [('filename',filename),('caption',caption)]
         files = [('file',filename,data)]
         content_type,body = encode_multipart_formdata(fields,files,mimetype)
-        r = self.api.upload(self._files,content_type,body)
+        r = self.api.upload(str(self._files),content_type,body)
         return MinusFile(self.api,None,json.loads(r.read()))
 
     def delete(self):
@@ -592,12 +592,54 @@ def encode_multipart_formdata(fields,files,mimetype=None):
     content_type = 'multipart/form-data; boundary=%s' % BOUNDARY
     return content_type, body
 
+def get(user,folder,args):
+    remote = user.find(folder)
+    if not remote:
+        print "ERROR: Can't open remote folder \"%s\"" % folder
+    else:
+        files = {}
+        if not args:
+            args = ['*']
+        for pattern in args:
+            for f in remote.glob(pattern):
+                files[f._name] = f
+        if files:
+            for name,remote in files.items():
+                try:
+                    data = remote.data()
+                    open(name,"w").write(data)
+                    print "--> GET \"%s\" OK (%d bytes)" % (name,len(data))
+                except IOError,e:
+                    print "ERROR: Unable to download \"%s\" (%s)" % (f,e.strerror) 
+                except MinusAPIError,e:
+                    print "ERROR: MinusAPIError \"%s\" (%s)" % (f,e.message) 
+        else:
+            print "ERROR: No remote files match"
+
+def put(user,folder,public,args):
+    remote = user.find(folder)
+    if not remote:
+        remote = user.new_folder(folder,public)
+    for f in args:
+        try:
+            local = open(f)
+            data = local.read()
+            remote.new(os.path.basename(f),data)
+            local.close()
+            print "--> PUT \"%s\" OK (%d bytes)" % (f,len(data))
+        except IOError,e:
+            print "ERROR: Unable to upload \"%s\" (%s)" % (f,e.strerror) 
+        except MinusAPIError,e:
+            print "ERROR: MinusAPIError \"%s\" (%s)" % (f,e.message) 
+
 if __name__ == '__main__':
     import optparse,getpass
     parser = optparse.OptionParser(usage="Usage: %prog [options]")
     parser.add_option("--username",help="Minus.com username (required)")
     parser.add_option("--password",help="Minus.com password")
     parser.add_option("--put",help="Upload files to folder (created if doesnt exist)")
+    parser.add_option("--get",help="Download files matching args (glob) from folder (full folder if no args)")
+    parser.add_option("--public",action="store_true",help="Create public folder (with --put)")
     parser.add_option("--debug",action="store_true",help="Debug")
     parser.add_option("--shell",action="store_true",help="Drop into python interpreter")
     options,args = parser.parse_args()
@@ -616,12 +658,9 @@ if __name__ == '__main__':
         cli = MinusCLI()
         cli.connect(user)
         if options.put:
-            from subprocess import list2cmdline 
-            new = user.find(options.put)
-            if not new:
-                new = user.new_folder(options.put)
-            cli.folder = new
-            cli.do_mput(list2cmdline(args))
+            put(user,options.put,options.public,args)
+        elif options.get:
+            get(user,options.get,args)
         else:
             cli.cmdloop()
 
