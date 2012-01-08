@@ -1,5 +1,30 @@
+#!/usr/bin/env python
 
-import cmd,cookielib,fnmatch,glob,json,mimetools,mimetypes,optparse,os,shlex,sys,time,types,urllib,urllib2
+"""
+
+    minus-cli.py
+
+
+    Introduction
+    ------------
+
+    minus-cli.py is a Python library which interacts with the minus.com 
+    (http://minus.com) file sharing service. 
+
+    It provides three layered services:
+
+    a)  A 'Pythonic' API to the Minus.com REST interface
+    b)  An interactive Minus.com client - modeled on ftp(1)
+    c)  A non-interactive command-line utility to upload/download files
+        to Minus.com
+
+
+"""
+
+import cmd,cookielib,fnmatch,glob,json,mimetools,mimetypes,optparse,os,\
+       shlex,sys,time,types,urllib,urllib2
+
+DEFAULT_SCOPE = 'read_public read_all upload_new modify_all modify_user'
 
 class MinusAPIError(Exception): pass
 
@@ -12,15 +37,17 @@ class MinusAPI(object):
 
     def __init__(self,debug=False,force_https=True):
         self.cj = cookielib.CookieJar()
-        self.opener = urllib2.build_opener(urllib2.HTTPSHandler(debuglevel=debug),
-                                           urllib2.HTTPCookieProcessor(self.cj))
+        self.opener = urllib2.build_opener(
+                            urllib2.HTTPSHandler(debuglevel=debug),
+                            urllib2.HTTPCookieProcessor(self.cj)
+                      )
         self.scope = None
         self.access_token = None
         self.refresh_token = None
         self.expires = 0
-        self.force_https = True
+        self.force_https = force_https
 
-    def authenticate(self,username,password,scope='read_public read_all upload_new modify_all modify_user'):
+    def authenticate(self,username,password,scope=DEFAULT_SCOPE):
         form = { 'grant_type'    : 'password',
                  'scope'         : scope,
                  'client_id'     : self.API_KEY,
@@ -119,7 +146,8 @@ class MinusUser(object):
                     raise MinusAPIError("Invalid User Object")
 
     def folders(self):
-        return [ MinusFolder(self.api,None,f) for f in self.api.list(self._folders) ]
+        return [ MinusFolder(self.api,None,f) 
+                    for f in self.api.list(self._folders) ]
 
     def new_folder(self,name,public=False):
         form = { 'name' : name,
@@ -142,10 +170,12 @@ class MinusUser(object):
         return result
 
     def followers(self):
-        return [ MinusUser(self.api,None,u) for u in self.api.list("users/%s/followers" % self._slug) ]
+        return [ MinusUser(self.api,None,u) 
+                    for u in self.api.list("users/%s/followers" % self._slug) ]
 
     def following(self):
-        return [ MinusUser(self.api,None,u) for u in self.api.list("users/%s/following" % self._slug) ]
+        return [ MinusUser(self.api,None,u) 
+                    for u in self.api.list("users/%s/following" % self._slug) ]
 
     def follow(self,user):
         if isinstance(user,MinusUser):
@@ -167,8 +197,8 @@ class MinusUser(object):
 
 class MinusFolder(object):
 
-    PARAMS = [ 'files', 'view_count', 'date_last_updated', 'name', 'creator', 'url',
-               'thumbnail_url', 'file_count', 'is_public', 'id' ]
+    PARAMS = [ 'files', 'view_count', 'date_last_updated', 'name', 'creator', 
+               'url', 'thumbnail_url', 'file_count', 'is_public', 'id' ]
 
     def __init__(self,api,url,params=None):
         self.api = api
@@ -206,12 +236,14 @@ class MinusFolder(object):
 
     def __str__(self):
         return '<MinusFolder: name="%s" id="%s" url="%s" files="%s" files=%d public=%s>' % \
-                (self._name, self._id, self._url, self._files, self._file_count, self._is_public)
+                (self._name, self._id, self._url, self._files, 
+                        self._file_count, self._is_public)
 
 class MinusFile(object):
 
     PARAMS = [ 'id', 'name', 'title', 'caption', 'width', 'height', 'filesize', 
-               'mimetype', 'folder', 'url', 'uploaded', 'url_rawfile', 'url_thumbnail' ]
+               'mimetype', 'folder', 'url', 'uploaded', 'url_rawfile', 
+               'url_thumbnail' ]
 
     def __init__(self,api,url,params=None):
         self.api = api
@@ -232,7 +264,8 @@ class MinusFile(object):
 
     def __str__(self):
         return '<MinusFile: name="%s" title="%s" caption="%s" id="%s" url="%s" size=%d>' % \
-                (self._name, self._title, self._caption, self._id, self._url, self._filesize)
+                (self._name, self._title, self._caption, self._id, 
+                        self._url, self._filesize)
 
 class PagedList(object):
 
@@ -435,7 +468,8 @@ class MinusCLI(cmd.Cmd):
                 new = self.folder.new(remote,data)
                 print "--> PUT \"%s\" OK (%d bytes)" % (new._name,len(data))
             except IOError,e:
-                print "--> PUT \"%s\" FAILED (Error opening local file: %s)" % (new._name,args[0])
+                print "--> PUT \"%s\" FAILED (Error opening local file: %s)" % (
+                                new._name,args[0])
 
     @folder_only
     @wrap_api_error
@@ -461,7 +495,8 @@ class MinusCLI(cmd.Cmd):
                     else:
                         try:
                             open(local,"w").write(data)
-                            print "--> GET \"%s\" OK (%d bytes)" % (remote._name,len(data))
+                            print "--> GET \"%s\" OK (%d bytes)" % (
+                                            remote._name,len(data))
                         except IOError:
                             print "--> GET \"%s\" FAILED (Can't write local file)" % remote._name
                 else:
@@ -538,14 +573,16 @@ class MinusCLI(cmd.Cmd):
                                              f._title or "-")
 
     def _print_folder_list(self,folders):
-        print "%-28s  %-19s  %5s  %7s  %s" % ("Folder","Updated","Files","Creator","Visibility")
+        print "%-28s  %-19s  %5s  %7s  %s" % (
+                        "Folder","Updated","Files","Creator","Visibility")
         print "-" * 80
         for f in folders:
             print "%-28s  %-19s  %5d  %-7s  %s" % (f._name,
                                                    f._date_last_updated,
                                                    f._file_count,
                                                    f._creator.split('/')[-1],
-                                                   f._is_public and "public" or "private")
+                                                   f._is_public and "public" 
+                                                                or "private")
 
     def _pipe_write(self,cmd,data):
         try:
@@ -566,10 +603,12 @@ def encode_multipart_formdata(fields,files,mimetype=None):
     Derived from - http://code.activestate.com/recipes/146306/
 
     fields is a sequence of (name, value) elements for regular form fields.
-    files is a sequence of (name, filename, value) elements for data to be uploaded as files
+    files is a sequence of (name, filename, value) elements for data to be 
+    uploaded as files
 
     Returns (content_type, body) ready for httplib.HTTP instance
     """
+
     BOUNDARY = mimetools.choose_boundary()
     CRLF = '\r\n'
     L = []
@@ -580,7 +619,8 @@ def encode_multipart_formdata(fields,files,mimetype=None):
         L.append(value)
     for (key, filename, value) in files:
         L.append('--' + BOUNDARY)
-        L.append('Content-Disposition: form-data; name="%s"; filename="%s"' % (key, filename))
+        L.append('Content-Disposition: form-data; name="%s"; filename="%s"' % (
+                        key, filename))
         L.append('Content-Type: %s' % (mimetype or 
                                        mimetypes.guess_type(filename)[0] or 
                                        'application/octet-stream'))
@@ -592,72 +632,94 @@ def encode_multipart_formdata(fields,files,mimetype=None):
     content_type = 'multipart/form-data; boundary=%s' % BOUNDARY
     return content_type, body
 
-def get(user,folder,args):
-    remote = user.find(folder)
-    if not remote:
-        print "ERROR: Can't open remote folder \"%s\"" % folder
-    else:
-        files = {}
-        if not args:
-            args = ['*']
-        for pattern in args:
-            for f in remote.glob(pattern):
-                files[f._name] = f
-        if files:
-            for name,remote in files.items():
-                try:
-                    data = remote.data()
-                    open(name,"w").write(data)
-                    print "--> GET \"%s\" OK (%d bytes)" % (name,len(data))
-                except IOError,e:
-                    print "ERROR: Unable to download \"%s\" (%s)" % (f,e.strerror) 
-                except MinusAPIError,e:
-                    print "ERROR: MinusAPIError \"%s\" (%s)" % (f,e.message) 
-        else:
-            print "ERROR: No remote files match"
-
-def put(user,folder,public,args):
-    remote = user.find(folder)
-    if not remote:
-        remote = user.new_folder(folder,public)
-    for f in args:
-        try:
-            local = open(f)
-            data = local.read()
-            remote.new(os.path.basename(f),data)
-            local.close()
-            print "--> PUT \"%s\" OK (%d bytes)" % (f,len(data))
-        except IOError,e:
-            print "ERROR: Unable to upload \"%s\" (%s)" % (f,e.strerror) 
-        except MinusAPIError,e:
-            print "ERROR: MinusAPIError \"%s\" (%s)" % (f,e.message) 
-
 if __name__ == '__main__':
+
+    def get(user,folder,args):
+        remote = user.find(folder)
+        if not remote:
+            print "ERROR: Can't open remote folder \"%s\"" % folder
+        else:
+            files = {}
+            if not args:
+                args = ['*']
+            for pattern in args:
+                for f in remote.glob(pattern):
+                    files[f._name] = f
+            if files:
+                for name,remote in files.items():
+                    try:
+                        data = remote.data()
+                        open(name,"w").write(data)
+                        print "--> GET \"%s\" OK (%d bytes)" % (name,len(data))
+                    except IOError,e:
+                        print "ERROR: Unable to download \"%s\" (%s)" % (
+                                    f,e.strerror) 
+                    except MinusAPIError,e:
+                        print "ERROR: MinusAPIError \"%s\" (%s)" % (f,e.message) 
+            else:
+                print "ERROR: No remote files match"
+
+    def put(user,folder,public,args):
+        remote = user.find(folder)
+        if not remote:
+            remote = user.new_folder(folder,public)
+        for f in args:
+            try:
+                local = open(f)
+                data = local.read()
+                remote.new(os.path.basename(f),data)
+                local.close()
+                print "--> PUT \"%s\" OK (%d bytes)" % (f,len(data))
+            except IOError,e:
+                print "ERROR: Unable to upload \"%s\" (%s)" % (f,e.strerror) 
+            except MinusAPIError,e:
+                print "ERROR: MinusAPIError \"%s\" (%s)" % (f,e.message) 
+
+    def list_folders(user):
+        for f in user.folders():
+            print "%s (%d files)%s" % (f._name,f._file_count,
+                                       f._is_public and " PUBLIC" or "")
+
     import optparse,getpass
-    parser = optparse.OptionParser(usage="Usage: %prog [options]")
-    parser.add_option("--username",help="Minus.com username (required)")
-    parser.add_option("--password",help="Minus.com password")
-    parser.add_option("--put",help="Upload files to folder (created if doesnt exist)")
-    parser.add_option("--get",help="Download files matching args (glob) from folder (full folder if no args)")
-    parser.add_option("--public",action="store_true",help="Create public folder (with --put)")
-    parser.add_option("--debug",action="store_true",help="Debug")
-    parser.add_option("--shell",action="store_true",help="Drop into python interpreter")
+
+    parser = optparse.OptionParser(usage="Usage: %prog [options] <args>")
+    parser.add_option("--username",
+                        help="Minus.com username (required)")
+    parser.add_option("--password",
+                        help="Minus.com password")
+    parser.add_option("--list-folders",action="store_true",
+                        help="List remote folders")
+    parser.add_option("--put",metavar="FOLDER",
+                        help="Upload files to folder (created if doesnt exist)")
+    parser.add_option("--get",metavar="FOLDER",
+                        help="Download files matching args (glob) from folder (full folder if no args)")
+    parser.add_option("--public",action="store_true",
+                        help="Create public folder (with --put)")
+    parser.add_option("--debug",action="store_true",
+                        help="Debug HTTP requests")
+    parser.add_option("--shell",action="store_true",
+                        help="Drop into python interpreter")
     options,args = parser.parse_args()
+
     if options.username is None:
         parser.print_help()
         sys.exit()
     if options.password is None:
         options.password = getpass.getpass("Minus.com Password: ")
+
     minus = MinusAPI(options.debug)
     minus.authenticate(options.username,options.password)
     user = minus.activeuser()
+
     if options.shell:
         import code
         code.interact(local=locals())
     else:
         cli = MinusCLI()
         cli.connect(user)
-        if options.put:
+        if options.list_folders:
+            list_folders(user)
+        elif options.put:
             put(user,options.put,options.public,args)
         elif options.get:
             get(user,options.get,args)
