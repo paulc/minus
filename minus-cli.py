@@ -18,6 +18,136 @@
     c)  A non-interactive command-line utility to upload/download files
         to Minus.com
 
+    Pythonic API
+    ------------
+
+    The minus-cli library exposes the Minus.com REST interface through a
+    number of Python proxy objects:
+
+        MinusConnection     - Low-level connection to REST API
+        MinusUser           - User object 
+        MinusFolder         - Folder object
+        MinusFile           - File object
+
+        MinusAPIError       - API Exception
+
+    A simple example of interaction with the API is -
+
+        >>> minus = MinusConnection()        
+        >>> minus.authenticate('user','password')
+        >>> user = minus.activeuser() 
+        >>> print [ f._name for f in user.folders() ]
+        >>> folder = minus.find('Stuff')
+        >>> print [ f._name for f in folder.files() ]
+
+    (See object docstrings for methods available)
+
+    Paging is handled transparently through the PagedList/PagedListIter
+    classes - these support lazy loading however in general this is 
+    not used through the helper classes.
+
+    Interactive Client
+    ------------------
+
+    If the module is run directly the __main__ method will call an 
+    interactive CLI client based on the 'cmd' library. This behaves
+    in a similar way to the ftp(1) client. Basic help and command
+    line editing are provided through the 'cmd' library.
+
+    A simple example of an interactive session is:
+
+    # ./minus-cli.py --username <user>
+    Password: 
+    (Minus:user) [/] : ls
+    Folder                        Updated              Files  Creator  Visibility
+    --------------------------------------------------------------------------------
+    Stuff                         2012-01-08 12:25:44     15  user     private
+    Stuff2                        2012-01-08 13:28:04      0  user     public
+    (Minus:paulc) [/] : cd Stuff
+    --> CWD "Stuff" OK
+    (Minus:user) [/Stuff] : ls
+    Name                          Uploaded                 Size  Title
+    --------------------------------------------------------------------------------
+    SNV33271.jpg                  2012-01-05 18:36:22    251673  -
+    SNV33183.jpg                  2012-01-05 18:35:57    176134  -
+    (Minus:paulc) [/Stuff] : get SNV33271.jpg 
+    --> GET "SNV33271.jpg" OK (251673 bytes)
+    (Minus:user) [/Stuff] : put t1.data
+    --> PUT "t1.data" OK (13672 bytes)
+
+    The library supports local/remote globbing and local i/o rediraction - eg.
+
+        Remote glob:        mget *.jpg (works with mget/del/ls/stat)
+        Local glob:         mput *.txt (works with mput)
+        Pipe to stdout:     get <file> -
+        Pipe to process:    get <file> |less
+        Pipe from process:  put date| date.txt
+
+    Command Line Utility
+    --------------------
+
+    If the module is run from the command line with the --get, --put, or
+    --list-folders options the utility runs non interactively and provides
+    a simple way of uploading/downloading content - eg.
+
+        Upload local files:     
+        
+            ./minus-cli.py --user user --put 'Folder Name' <files>
+
+            (Folder is created if it doesnt already exist)
+
+        Upload local files to public folder:     
+
+            ./minus-cli.py --user user --public --put 'Folder Name' <files>
+
+        Download remote files:
+
+            ./minus-cli.py --user user --public --get 'Folder Name' 
+            
+        Download matching remote files:
+
+            ./minus-cli.py --user user --public --get 'Folder Name' \*.jpg \*.png
+
+            (Remember to quote remote glob so that it isn't expanded by the shell)
+
+        List Folders:
+
+            ./minus-cli.py --user user --list-folders
+
+        (You can specify the password on the command-line however note that this 
+        will be visible in process args - if not specified will be prompted)
+
+    Debugging/Development
+    ---------------------
+
+    You can turn on the --debug flag to see the HTTP requests/responses and also
+    use the --shell flag to drop into an interactive Python interpreter immediately
+    after authentication where you can experiment with the API - there will be 
+    MinusConnection (minus) and MinusUser (user) variables available.
+
+    Dependencies
+    ------------
+
+    The module comprises a single file and can be either installed normally using
+    pip/site-packages etc or just installed & called from a local directory. There
+    are no dependencies other than the Python interpreter (tested with 2.7 but 
+    should be ok with earlier).
+
+    Repository/Issues
+    -----------------
+    
+    The master repository is https://bitbucket.org/paulc/minus-cli. Please use the
+    Issue tracker there to raise any issues.
+
+    License
+    -------
+
+    MIT
+
+    Author
+    ------
+
+    Paul Chakravarti (paul.chakravarti@gmail.com)
 
 """
 
@@ -26,9 +156,21 @@ import cmd,cookielib,fnmatch,glob,json,mimetools,mimetypes,optparse,os,\
 
 DEFAULT_SCOPE = 'read_public read_all upload_new modify_all modify_user'
 
-class MinusAPIError(Exception): pass
+class MinusAPIError(Exception): 
+    """
+        API Exception Object
+    """
+    pass
 
-class MinusAPI(object):
+class MinusConnection(object):
+
+    """
+        Low level connection to Minus.com REST API. Handles access token
+        automatically.
+
+        Used primarily for authentication and to retreive the 'activeuser'
+        MinusUser object
+    """
 
     API_KEY = "497d2fb4eb5a7b38cb1302f78e95da"
     API_SECRET = "1cab9be1c76c61d2ed396a4baaf127"
@@ -36,6 +178,13 @@ class MinusAPI(object):
     AUTH_URL = "https://minus.com/oauth/token"
 
     def __init__(self,debug=False,force_https=True):
+        """
+            Create MinusConnection object. 
+
+            @debug          - Turn on urllib2 debugging (HTTP request/response)
+            @force_https    - Rewrite REST URIs to force HTTPS (usually only
+                            authentication under HTTPS)
+        """
         self.cj = cookielib.CookieJar()
         self.opener = urllib2.build_opener(
                             urllib2.HTTPSHandler(debuglevel=debug),
@@ -48,6 +197,14 @@ class MinusAPI(object):
         self.force_https = force_https
 
     def authenticate(self,username,password,scope=DEFAULT_SCOPE):
+        """
+            Authenticate user
+
+            @username       - Minus.com username
+            @password       - Minus.com passowrd
+            @scope          - Minus.com scope (see REST API docs) - defaults
+                            to all permissions
+        """
         form = { 'grant_type'    : 'password',
                  'scope'         : scope,
                  'client_id'     : self.API_KEY,
@@ -66,6 +223,15 @@ class MinusAPI(object):
             raise MinusAPIError('Error Authenticating')
 
     def refresh(self,scope=None):
+        """
+            Refresh logon session (potentially changing scope)
+
+            @scope          - Minus.com scope (see REST API docs)
+
+            TODO - the request method should check the time remaining
+                   on the logon session and automatically call refresh
+                   if needed
+        """
         form = { 'grant_type'    : 'refresh_token',
                  'scope'         : scope or self.scope,
                  'client_id'     : self.API_KEY,
@@ -82,9 +248,19 @@ class MinusAPI(object):
             raise MinusAPIError('Error Authenticating')
 
     def activeuser(self):
+        """
+            Return MinusUser object representing the 'activeuser' (user
+            who logged on to API
+        """
         return MinusUser(self,'activeuser')
 
     def _url(self,url):
+        """
+            Rewrite url add API_URL to relative paths and force https if 
+            required (self.force_https is set)
+
+            @url        - API URL to rewrite (either absolute or relative)
+        """
         if url.startswith('http:') and self.force_https:
             return 'https:' + url[5:]
         elif not url.startswith('http'):
@@ -93,6 +269,15 @@ class MinusAPI(object):
             return url
 
     def request(self,url,data=None,method=None,content_type=None):
+        """
+            Send request to API and return file object with response. 
+            Handles authorisation token transparently.
+
+            @url            - API URL (absolute or relative)
+            @data           - POST data
+            @method         - HTTP Method
+            @content_type   - HTTP Content-Type
+        """
         if self.access_token is None:
             raise MinusAPIError('Not Authenticated')
         try:
@@ -107,6 +292,13 @@ class MinusAPI(object):
              raise MinusAPIError('Request HTTP Error: %d' % e.code)
 
     def upload(self,url,content_type,body):
+        """
+            Send multipart/form-data upload request
+
+            @url            - API URL (absolute or relative)
+            @content_type   - multipart/form-data boundary=xxxxxx
+            @body           - Data (multipart enocoded)
+        """
         if self.access_token is None:
             raise MinusAPIError('Not Authenticated')
         r = urllib2.Request(self._url(url),body)
@@ -116,13 +308,16 @@ class MinusAPI(object):
         return self.opener.open(r)
 
     def list(self,url):
+        """
+            Return PagedList for url
+        """
         return PagedList(self,url)
 
     def __str__(self):
         if self.access_token:
-            return '<MinusAPI: Authenticated [%s]>' % self.scope
+            return '<MinusConnection: Authenticated [%s]>' % self.scope
         else:
-            return '<MinusAPI: Not Authenticated>'
+            return '<MinusConnection: Not Authenticated>'
 
 class MinusUser(object):
 
@@ -469,7 +664,7 @@ class MinusCLI(cmd.Cmd):
                 print "--> PUT \"%s\" OK (%d bytes)" % (new._name,len(data))
             except IOError,e:
                 print "--> PUT \"%s\" FAILED (Error opening local file: %s)" % (
-                                new._name,args[0])
+                                local,args[0])
 
     @folder_only
     @wrap_api_error
@@ -697,6 +892,8 @@ if __name__ == '__main__':
                         help="Create public folder (with --put)")
     parser.add_option("--debug",action="store_true",
                         help="Debug HTTP requests")
+    parser.add_option("--force-https",action="store_true",
+                        help="Force HTTPS for all transactions (normally authentication only)")
     parser.add_option("--shell",action="store_true",
                         help="Drop into python interpreter")
     options,args = parser.parse_args()
@@ -707,7 +904,7 @@ if __name__ == '__main__':
     if options.password is None:
         options.password = getpass.getpass("Minus.com Password: ")
 
-    minus = MinusAPI(options.debug)
+    minus = MinusConnection(options.debug,options.force_https)
     minus.authenticate(options.username,options.password)
     user = minus.activeuser()
 
