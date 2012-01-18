@@ -1,0 +1,170 @@
+
+
+minus.py
+
+
+Introduction
+------------
+
+minus.py is a Python library which interacts with the minus.com 
+(http://minus.com) file sharing service. 
+
+It provides three layered services:
+
+a)  A 'Pythonic' API to the Minus.com REST interface
+b)  An interactive Minus.com client - modeled on ftp(1)
+c)  A non-interactive command-line utility to upload/download files
+    to Minus.com
+
+Pythonic API
+------------
+
+The minus library exposes the Minus.com REST interface through a
+number of Python proxy objects:
+
+    MinusConnection     - Low-level connection to REST API
+    MinusUser           - User object 
+    MinusFolder         - Folder object
+    MinusFile           - File object
+
+    MinusAPIError       - API Exception
+
+A simple example of interaction with the API is -
+
+    >>> minus = MinusConnection()        
+    >>> minus.authenticate('user','password')
+    >>> user = minus.activeuser() 
+    >>> print [ f._name for f in user.folders() ]
+    >>> folder = minus.find('Stuff')
+    >>> print [ f._name for f in folder.files() ]
+
+(See object docstrings for methods available)
+
+Paging is handled transparently through the PagedList/PagedListIter
+classes - these support lazy loading however in general this is 
+not used through the helper classes.
+
+Interactive Client
+------------------
+
+If the module is run directly the __main__ method will call an 
+interactive CLI client based on the 'cmd' library. This behaves
+in a similar way to the ftp(1) client. Basic help and command
+line editing are provided through the 'cmd' library.
+
+The available commands are:
+
+    cd <folder>             Change remote folder
+    del <files>..           Delete remote files
+    get <remote> [<local>]  Get remote file
+    lcd <path>              Change local directory
+    lpwd                    Print local path
+    ls                      List remote folder
+    mget <files>..          Get multiple remote files
+    mkdir                   Create remote folder (private)
+    mkpublic                Create remote folder (public)
+    mput <files>..          Put multiple local files
+    put <local> [<remote>]  Put local file
+    pwd                     Print remote folder
+    rmdir                   Delete remote folder (deletes contents)
+    stat <files>..          Print details on remote files
+
+The library supports local/remote globbing and local i/o rediraction - eg.
+
+    Remote glob:        mget *.jpg (works with mget/del/ls/stat)
+    Local glob:         mput *.txt (works with mput)
+    Pipe to stdout:     get <file> -
+    Pipe to process:    get <file> |less
+    Pipe from process:  put date| date.txt
+
+Note - Minus.com allows multiple folders/files with the same name (the id 
+attribute provides a unique id)
+
+A simple example of an interactive session is:
+
+# ./minus.py --username <user>
+Password: 
+(Minus:user) [/] : ls
+Folder                        Updated              Files  Creator  Visibility
+--------------------------------------------------------------------------------
+Stuff                         2012-01-08 12:25:44     15  user     private
+Stuff2                        2012-01-08 13:28:04      0  user     public
+(Minus:paulc) [/] : cd Stuff
+--> CWD "Stuff" OK
+(Minus:user) [/Stuff] : ls
+Name                          Uploaded                 Size  Title
+--------------------------------------------------------------------------------
+SNV33271.jpg                  2012-01-05 18:36:22    251673  -
+SNV33183.jpg                  2012-01-05 18:35:57    176134  -
+(Minus:paulc) [/Stuff] : get SNV33271.jpg 
+--> GET "SNV33271.jpg" OK (251673 bytes)
+(Minus:user) [/Stuff] : put t1.data
+--> PUT "t1.data" OK (13672 bytes)
+
+Command Line Utility
+--------------------
+
+If the module is run from the command line with the --get, --put, or
+--list-folders options the utility runs non interactively and provides
+a simple way of uploading/downloading content - eg.
+
+    Upload local files:     
+    
+        ./minus.py --user user --put 'Folder Name' <files>
+
+        (Folder is created if it doesnt already exist)
+
+    Upload local files to public folder:     
+
+        ./minus.py --user user --public --put 'Folder Name' <files>
+
+    Download remote files:
+
+        ./minus.py --user user --get 'Folder Name' 
+        
+    Download matching remote files:
+
+        ./minus.py --user user --get 'Folder Name' \*.jpg \*.png
+
+        (Remember to quote remote glob so that it isn't expanded by the shell)
+
+    List Folders:
+
+        ./minus.py --user user --list-folders
+
+    (You can specify the password on the command-line however note that this 
+    will be visible in process args - if not specified will be prompted)
+
+Debugging/Development
+---------------------
+
+You can turn on the --debug flag to see the HTTP requests/responses and also
+use the --shell flag to drop into an interactive Python interpreter immediately
+after authentication where you can experiment with the API - there will be 
+MinusConnection (minus) and MinusUser (user) variables available.
+
+Dependencies
+------------
+
+The module comprises a single file and can be either installed normally using
+pip/site-packages etc or just installed & called from a local directory. There
+are no dependencies other than the Python interpreter (tested with 2.7 but 
+should be ok with earlier).
+
+Repository/Issues
+-----------------
+
+The master repository is https://bitbucket.org/paulc/minus. Please use the
+Issue tracker there to raise any issues.
+
+License
+-------
+
+MIT
+
+Author
+------
+
+Paul Chakravarti (paul.chakravarti@gmail.com)
+
+
