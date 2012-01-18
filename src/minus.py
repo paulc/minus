@@ -2,13 +2,13 @@
 
 """
 
-    minus-cli.py
+    minus.py
 
 
     Introduction
     ------------
 
-    minus-cli.py is a Python library which interacts with the minus.com 
+    minus.py is a Python library which interacts with the minus.com 
     (http://minus.com) file sharing service. 
 
     It provides three layered services:
@@ -21,7 +21,7 @@
     Pythonic API
     ------------
 
-    The minus-cli library exposes the Minus.com REST interface through a
+    The minus library exposes the Minus.com REST interface through a
     number of Python proxy objects:
 
         MinusConnection     - Low-level connection to REST API
@@ -54,9 +54,37 @@
     in a similar way to the ftp(1) client. Basic help and command
     line editing are provided through the 'cmd' library.
 
+    The available commands are:
+
+        cd <folder>             Change remote folder
+        del <files>..           Delete remote files
+        get <remote> [<local>]  Get remote file
+        lcd <path>              Change local directory
+        lpwd                    Print local path
+        ls                      List remote folder
+        mget <files>..          Get multiple remote files
+        mkdir                   Create remote folder (private)
+        mkpublic                Create remote folder (public)
+        mput <files>..          Put multiple local files
+        put <local> [<remote>]  Put local file
+        pwd                     Print remote folder
+        rmdir                   Delete remote folder (deletes contents)
+        stat <files>..          Print details on remote files
+
+    The library supports local/remote globbing and local i/o rediraction - eg.
+
+        Remote glob:        mget *.jpg (works with mget/del/ls/stat)
+        Local glob:         mput *.txt (works with mput)
+        Pipe to stdout:     get <file> -
+        Pipe to process:    get <file> |less
+        Pipe from process:  put date| date.txt
+
+    Note - Minus.com allows multiple folders/files with the same name (the id 
+    attribute provides a unique id)
+
     A simple example of an interactive session is:
 
-    # ./minus-cli.py --username <user>
+    # ./minus.py --username <user>
     Password: 
     (Minus:user) [/] : ls
     Folder                        Updated              Files  Creator  Visibility
@@ -75,14 +103,6 @@
     (Minus:user) [/Stuff] : put t1.data
     --> PUT "t1.data" OK (13672 bytes)
 
-    The library supports local/remote globbing and local i/o rediraction - eg.
-
-        Remote glob:        mget *.jpg (works with mget/del/ls/stat)
-        Local glob:         mput *.txt (works with mput)
-        Pipe to stdout:     get <file> -
-        Pipe to process:    get <file> |less
-        Pipe from process:  put date| date.txt
-
     Command Line Utility
     --------------------
 
@@ -92,27 +112,27 @@
 
         Upload local files:     
         
-            ./minus-cli.py --user user --put 'Folder Name' <files>
+            ./minus.py --user user --put 'Folder Name' <files>
 
             (Folder is created if it doesnt already exist)
 
         Upload local files to public folder:     
 
-            ./minus-cli.py --user user --public --put 'Folder Name' <files>
+            ./minus.py --user user --public --put 'Folder Name' <files>
 
         Download remote files:
 
-            ./minus-cli.py --user user --public --get 'Folder Name' 
+            ./minus.py --user user --get 'Folder Name' 
             
         Download matching remote files:
 
-            ./minus-cli.py --user user --public --get 'Folder Name' \*.jpg \*.png
+            ./minus.py --user user --get 'Folder Name' \*.jpg \*.png
 
             (Remember to quote remote glob so that it isn't expanded by the shell)
 
         List Folders:
 
-            ./minus-cli.py --user user --list-folders
+            ./minus.py --user user --list-folders
 
         (You can specify the password on the command-line however note that this 
         will be visible in process args - if not specified will be prompted)
@@ -153,6 +173,8 @@
 
 import cmd,cookielib,fnmatch,glob,json,mimetools,mimetypes,optparse,os,\
        shlex,sys,time,types,urllib,urllib2
+
+VERSION = '1.0'
 
 DEFAULT_SCOPE = 'read_public read_all upload_new modify_all modify_user'
 
@@ -321,12 +343,28 @@ class MinusConnection(object):
 
 class MinusUser(object):
 
+    """
+        Represents Minus user & provides methods to create/find 
+        associated folders
+    """
     PARAMS = [ 'username', 'display_name', 'description', 'email', 'slug',
                'fb_profile_link', 'fb_username', 'twitter_screen_name',
                'visits', 'karma', 'shared', 'folders', 'url', 'avatar',
                'storage_used', 'storage_quota' ]
 
     def __init__(self,api,url,params=None):
+        """
+            Create MinusUser object - can be craeted from either a 
+            url or a dict of params (typically returned by another
+            API call)
+
+            @api            - MinusConnection object
+            @url            - URL for User (None if creating from params)
+            @params         - Dict of user params (see PARAMS for keys)
+
+            PARAMS list is used to create instance variables (keys are
+            munged to prepend _ - ie. username is obj._username)
+        """
         self.api = api
         if url:
             response = self.api.request(url)
@@ -341,10 +379,19 @@ class MinusUser(object):
                     raise MinusAPIError("Invalid User Object")
 
     def folders(self):
+        """
+            Return list of MinusFolder objects associated with user
+        """
         return [ MinusFolder(self.api,None,f) 
                     for f in self.api.list(self._folders) ]
 
     def new_folder(self,name,public=False):
+        """
+            Create new folder and return MinusFolder object
+
+            @name           - Folder name
+            @public         - Make folder public (True/False)
+        """
         form = { 'name' : name,
                  'is_public' : public and 'true' or 'false' }
         data = urllib.urlencode(form)
@@ -352,12 +399,26 @@ class MinusUser(object):
         return MinusFolder(self.api,None,json.loads(r.read()))
 
     def find(self,name):
+        """
+            Return MinusFolder object with specified name (or None)
+
+            @name           - Folder name
+
+            (Note - if there are multiple folders which match the
+            name the first match is returned)
+        """
         for f in self.api.list(self._folders):
             if f['name'] == name:
                 return MinusFolder(self.api,None,f)
         return None
 
     def glob(self,pattern):
+        """
+            Return list of MinusFolder objects matching glob 
+            pattern
+
+            @pattern        - Folder glob pattern
+        """
         result = []
         for f in self.api.list(self._folders):
             if fnmatch.fnmatch(f['name'],pattern):
@@ -365,14 +426,25 @@ class MinusUser(object):
         return result
 
     def followers(self):
+        """
+            Return list of followers
+        """
         return [ MinusUser(self.api,None,u) 
                     for u in self.api.list("users/%s/followers" % self._slug) ]
 
     def following(self):
+        """
+            Return following list
+        """
         return [ MinusUser(self.api,None,u) 
                     for u in self.api.list("users/%s/following" % self._slug) ]
 
     def follow(self,user):
+        """
+            Follow user
+
+            @user       - User to follow (either MinusUser object or username as string
+        """
         if isinstance(user,MinusUser):
             form = { 'slug' : user._slug }
         else:
@@ -392,10 +464,25 @@ class MinusUser(object):
 
 class MinusFolder(object):
 
+    """
+        Represents Minus folder object & provides methods to create/find files
+    """
     PARAMS = [ 'files', 'view_count', 'date_last_updated', 'name', 'creator', 
                'url', 'thumbnail_url', 'file_count', 'is_public', 'id' ]
 
     def __init__(self,api,url,params=None):
+        """
+            Create MinusFolder object - can be craeted from either a 
+            url or a dict of params (typically returned by another
+            API call)
+
+            @api            - MinusConnection object
+            @url            - URL for Folder (None if creating from params)
+            @params         - Dict of user params (see PARAMS for keys)
+
+            PARAMS list is used to create instance variables (keys are
+            munged to prepend _ - ie. name is obj._name)
+        """
         self.api = api
         if url:
             response = self.api.request(url)
@@ -404,15 +491,32 @@ class MinusFolder(object):
             setattr(self, "_" + p, params[p])
 
     def files(self):
+        """
+            Return list of MinusFile objects in folder
+        """
         return [ MinusFile(self.api,None,f) for f in self.api.list(self._files) ]
         
     def find(self,name):
+        """
+            Return MinusFile object with specified name (or None)
+
+            @name           - File name
+
+            (Note - if there are multiple files which match the
+            name the first match is returned)
+        """
         for f in self.api.list(self._files):
             if f['name'] == name:
                 return MinusFile(self.api,None,f)
         return None
 
     def glob(self,pattern):
+        """
+            Return list of MinusFile objects matching glob 
+            pattern
+
+            @pattern        - File glob pattern
+        """
         result = []
         for f in self.api.list(self._files):
             if fnmatch.fnmatch(f['name'],pattern):
@@ -420,6 +524,17 @@ class MinusFolder(object):
         return result
 
     def new(self,filename,data,caption=None,mimetype=None):
+        """
+            Create remote file 
+
+            @filename       - Remote filename
+            @data           - Data
+            @caption        - Caption (optional)
+            @mimetype       - Mimetype (optional)
+
+            XXX - data is stored in memory so this isnt 
+            useful for very large files
+        """
         fields = [('filename',filename),('caption',caption)]
         files = [('file',filename,data)]
         content_type,body = encode_multipart_formdata(fields,files,mimetype)
@@ -427,6 +542,9 @@ class MinusFolder(object):
         return MinusFile(self.api,None,json.loads(r.read()))
 
     def delete(self):
+        """
+            Delete folder
+        """
         self.api.request(self._url,None,'DELETE')
 
     def __str__(self):
@@ -436,11 +554,27 @@ class MinusFolder(object):
 
 class MinusFile(object):
 
+    """
+        Represents Minus file
+    """
+
     PARAMS = [ 'id', 'name', 'title', 'caption', 'width', 'height', 'filesize', 
                'mimetype', 'folder', 'url', 'uploaded', 'url_rawfile', 
                'url_thumbnail' ]
 
     def __init__(self,api,url,params=None):
+        """
+            Create MinusFile object - can be craeted from either a 
+            url or a dict of params (typically returned by another
+            API call)
+
+            @api            - MinusConnection object
+            @url            - URL for File (None if creating from params)
+            @params         - Dict of user params (see PARAMS for keys)
+
+            PARAMS list is used to create instance variables (keys are
+            munged to prepend _ - ie. name is obj._name)
+        """
         self.api = api
         if url:
             response = self.api.request(url)
@@ -449,12 +583,21 @@ class MinusFile(object):
             setattr(self, "_" + p, params[p])
 
     def file(self):
+        """
+            Return file object for remote file
+        """
         return self.api.request(self._url_rawfile)
 
     def data(self):
+        """
+            Return string object for remote data
+        """
         return self.file().read()
 
     def delete(self):
+        """
+            Delete remote file
+        """
         self.api.request(self._url,None,'DELETE')
 
     def __str__(self):
@@ -464,7 +607,16 @@ class MinusFile(object):
 
 class PagedList(object):
 
+    """
+        Object encapsulating remote paged list
+    """
     def __init__(self,api,url):
+        """
+            Create PagedList object
+
+            @api            - MinusConnection object
+            @url            - Remote URL 
+        """
         self.api = api
         response = api.request(url).read()
         params = json.loads(response)
@@ -473,6 +625,9 @@ class PagedList(object):
         self._results = params['results']
 
     def extend(self):
+        """
+            Get next page
+        """
         if self._next:
             response = self.api.request(self._next).read()
             params = json.loads(response)
@@ -482,15 +637,30 @@ class PagedList(object):
         return False
 
     def __iter__(self):
+        """
+            Return iterator object
+        """
         return PagedListIter(self)
 
 class PagedListIter(object):
 
+    """
+        Iterator object supporting PagedList
+    """
+
     def __init__(self,pagedlist):
+        """
+            Create iterator
+
+            @pagedlist          - PagedList object
+        """
         self.list = pagedlist
         self.index = 0
 
     def next(self):
+        """
+            Get next item transparently extending series as required
+        """
         try:
             result = self.list._results[self.index]
         except IndexError:
@@ -502,6 +672,9 @@ class PagedListIter(object):
         return result
 
 def wrap_api_error(f):
+    """
+        Wrapper to catch remote API errors in CLI
+    """
     def wrapped(self,*args):
         try:
             result = f(self,*args)
@@ -510,6 +683,9 @@ def wrap_api_error(f):
     return wrapped
 
 def root_only(f):
+    """
+        Wrapper to force CLI commands to root level only
+    """
     def wrapped(self,*args):
         if self.folder:
             print "ERROR: Command only valid at root folder"
@@ -519,6 +695,9 @@ def root_only(f):
     return wrapped
 
 def folder_only(f):
+    """
+        Wrapper to force CLI commands to folder only
+    """
     def wrapped(self,*args):
         if not self.folder:
             print "ERROR: Command only valid in sub-folder"
@@ -528,26 +707,47 @@ def folder_only(f):
 
 class MinusCLI(cmd.Cmd):
 
+    """
+        Cmd based CLI for Minus.com modeled on ftp(1)
+    """
+
     def connect(self,user):
+        """
+            Connect to service
+
+            @user       - Authenticated MinusUser object
+        """
         self.user = user
         self.root = user._folders
         self.folder = None
         self._set_prompt()
 
     def _set_prompt(self):
+        """
+            Set interactive prompt to show user/folder
+        """
         self.prompt = "(Minus:%s) [/%s] : " % (self.user._username, 
                                     self.folder and self.folder._name or "")
 
     def do_pwd(self,line):
+        """
+            Print remote folder
+        """
         if self.folder:
             print "Folder:", self.folder._name
         else:
             print "Folder: /"
 
     def do_lpwd(self,line):
+        """
+            Print local path
+        """
         print "Local Path:", os.getcwd()
 
     def do_lcd(self,line):
+        """
+            Change local directory 
+        """
         args = shlex.split(line)
         path = args[0]
         try:
@@ -557,6 +757,9 @@ class MinusCLI(cmd.Cmd):
             print "ERROR: Unable to chdir to \"%s\"" % path
 
     def do_cd(self,line):
+        """
+            Change remote folder
+        """
         args = shlex.split(line)
         folder = args[0]
         if self.folder:
@@ -584,6 +787,9 @@ class MinusCLI(cmd.Cmd):
     @folder_only
     @wrap_api_error
     def do_stat(self,line):
+        """
+            Print details on remote files (supports remote glob argument)
+        """
         files = {}
         for pattern in shlex.split(line):
             for remote in self.folder.glob(pattern):
@@ -609,6 +815,9 @@ class MinusCLI(cmd.Cmd):
     @root_only
     @wrap_api_error
     def do_mkpublic(self,line):
+        """
+            Create remote folder (public)
+        """
         for d in shlex.split(line):
             new = self.user.new_folder(d,True)
             print "--> MKPUBLIC \"%s\" OK" % new._name
@@ -616,6 +825,9 @@ class MinusCLI(cmd.Cmd):
     @root_only
     @wrap_api_error
     def do_mkdir(self,line):
+        """
+            Create remote folder (private))
+        """
         for d in shlex.split(line):
             new = self.user.new_folder(d)
             print "--> MKDIR \"%s\" OK" % new._name
@@ -623,6 +835,9 @@ class MinusCLI(cmd.Cmd):
     @root_only
     @wrap_api_error
     def do_rmdir(self,line):
+        """
+            Delete remote folders
+        """
         for d in shlex.split(line):
             folder = self.user.find(d)
             if folder:
@@ -634,6 +849,9 @@ class MinusCLI(cmd.Cmd):
     @folder_only
     @wrap_api_error
     def do_del(self,line):
+        """
+            Delete remote files
+        """
         matches = 0
         for pattern in shlex.split(line):
             for remote in self.folder.glob(pattern):
@@ -646,6 +864,13 @@ class MinusCLI(cmd.Cmd):
     @folder_only
     @wrap_api_error
     def do_put(self,line):
+        """
+            Put local file
+
+            put <local> [<remote>]
+
+            <local> supports i/o redirection (- for stdin, cmd| for pipe)
+        """
         args = shlex.split(line)
         if args:
             try:
@@ -669,6 +894,13 @@ class MinusCLI(cmd.Cmd):
     @folder_only
     @wrap_api_error
     def do_get(self,line):
+        """
+            Get remote file
+
+            get <remote> [<local>]
+
+            <local> supports i/o redirection (- for stdin, |cmd for pipe)
+        """
         if self.folder:
             args = shlex.split(line)
             if args:
@@ -702,6 +934,13 @@ class MinusCLI(cmd.Cmd):
     @folder_only
     @wrap_api_error
     def do_mput(self,line):
+        """
+            Put multiple local files
+
+            mput <files>..
+
+            Supports local globbing
+        """
         files = set()
         for pattern in shlex.split(line):
             files.update(glob.glob(pattern))
@@ -722,6 +961,13 @@ class MinusCLI(cmd.Cmd):
     @folder_only
     @wrap_api_error
     def do_mget(self,line):
+        """
+            Get multiple remote files
+
+            mget <files>..
+
+            Supports remote globbing
+        """
         files = {}
         for pattern in shlex.split(line):
             for f in self.folder.glob(pattern):
@@ -739,6 +985,9 @@ class MinusCLI(cmd.Cmd):
 
     @wrap_api_error
     def do_ls(self,line):
+        """
+            List remote folder
+        """
         args = shlex.split(line)
         result = {}
         if not args:
@@ -759,6 +1008,9 @@ class MinusCLI(cmd.Cmd):
         return True
 
     def _print_file_list(self,files):
+        """
+            Template for file listing
+        """
         print "%-28s  %-19s  %8s  %s" % ("Name","Uploaded","Size","Title")
         print "-" * 80
         for f in files:
@@ -768,6 +1020,9 @@ class MinusCLI(cmd.Cmd):
                                              f._title or "-")
 
     def _print_folder_list(self,folders):
+        """
+            Template for folder listing
+        """
         print "%-28s  %-19s  %5s  %7s  %s" % (
                         "Folder","Updated","Files","Creator","Visibility")
         print "-" * 80
@@ -780,6 +1035,9 @@ class MinusCLI(cmd.Cmd):
                                                                 or "private")
 
     def _pipe_write(self,cmd,data):
+        """
+            Pipe helper
+        """
         try:
             pipe = os.popen(cmd,'w')
             pipe.write(data)
@@ -788,6 +1046,9 @@ class MinusCLI(cmd.Cmd):
             pass
     
     def _pipe_read(self,cmd):
+        """
+            Pipe helper
+        """
         try:
             return os.popen(cmd)
         except IOError:
