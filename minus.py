@@ -156,7 +156,7 @@
     Repository/Issues
     -----------------
     
-    The master repository is https://bitbucket.org/paulc/minus-cli. Please use the
+    The master repository is https://bitbucket.org/paulc/minus. Please use the
     Issue tracker there to raise any issues.
 
     License

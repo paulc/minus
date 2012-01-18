@@ -2,10 +2,8 @@
 
 from distutils.core import Command,setup
 
-import sys
-sys.path.append("src")
 import minus
-long_description = minus.__doc__.rstrip() + "\n"
+long_description = "\n".join([l[4:] for l in minus.__doc__.split("\n")]) + "\n"
 version = minus.VERSION
 
 class GenerateReadme(Command):
@@ -24,9 +22,10 @@ setup(name='minus',
       author_email = 'paul.chakravarti@gmail.com',
       url = 'http://bitbucket.org/paulc/minus/',
       cmdclass = { 'readme' : GenerateReadme },
-      packages = ['minus'],
-      package_dir = {'minus':'src'},
+      py_modules = ['minus'],
+      scripts= ['minus.py'],
       license = 'BSD',
       classifiers = [ "Topic :: Communications :: File Sharing",
-                      "Topic :: Software Development :: Libraries" ]
+                      "Topic :: Software Development :: Libraries",
+                    ]
      )
