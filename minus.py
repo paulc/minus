@@ -33,7 +33,7 @@
 
     A simple example of interaction with the API is -
 
-        >>> minus = MinusConnection()        
+        >>> minus = MinusConnection('api_key','api_secret')        
         >>> minus.authenticate('user','password')
         >>> user = minus.activeuser() 
         >>> print [ f._name for f in user.folders() ]
@@ -137,6 +137,22 @@
         (You can specify the password on the command-line however note that this 
         will be visible in process args - if not specified will be prompted)
 
+    API Key
+    -------
+
+    You must have a valid Minus.com API_KEY/API_SECRET to use the library (see
+    http://minus.com/pages/api to request an API key). These are normally
+    passed into the MinusConnection constructor.
+
+    To use the CLI client the API_KEY/API_SECRET should be placed in a config
+    file (by default ~/.minus.conf - can be changed using the --config flag).
+    The file is in '.ini' format and contains a single [api] section with
+    api_key and api_secret keys:
+
+        [api]
+        api_key: ...
+        api_secret: ...
+
     Debugging/Development
     ---------------------
 
@@ -194,15 +210,15 @@ class MinusConnection(object):
         MinusUser object
     """
 
-    API_KEY = "497d2fb4eb5a7b38cb1302f78e95da"
-    API_SECRET = "1cab9be1c76c61d2ed396a4baaf127"
     API_URL = "https://minus.com/api/v2/"
     AUTH_URL = "https://minus.com/oauth/token"
 
-    def __init__(self,debug=False,force_https=True):
+    def __init__(self,api_key,api_secret,debug=False,force_https=True):
         """
             Create MinusConnection object. 
 
+            @api_key        - Minus.com API key
+            @api_secret     - Minus.com API secret
             @debug          - Turn on urllib2 debugging (HTTP request/response)
             @force_https    - Rewrite REST URIs to force HTTPS (usually only
                             authentication under HTTPS)
@@ -212,6 +228,8 @@ class MinusConnection(object):
                             urllib2.HTTPSHandler(debuglevel=debug),
                             urllib2.HTTPCookieProcessor(self.cj)
                       )
+        self.api_key = api_key
+        self.api_secret = api_secret
         self.scope = None
         self.access_token = None
         self.refresh_token = None
@@ -229,8 +247,8 @@ class MinusConnection(object):
         """
         form = { 'grant_type'    : 'password',
                  'scope'         : scope,
-                 'client_id'     : self.API_KEY,
-                 'client_secret' : self.API_SECRET,
+                 'client_id'     : self.api_key,
+                 'client_secret' : self.api_secret,
                  'username'      : username,
                  'password'      : password }
         data = urllib.urlencode(form)
@@ -256,8 +274,8 @@ class MinusConnection(object):
         """
         form = { 'grant_type'    : 'refresh_token',
                  'scope'         : scope or self.scope,
-                 'client_id'     : self.API_KEY,
-                 'client_secret' : self.API_SECRET,
+                 'client_id'     : self.api_key,
+                 'client_secret' : self.api_secret,
                  'refresh_token' : self.refresh_token }
         data = urllib.urlencode(form)
         try:
@@ -1136,13 +1154,15 @@ if __name__ == '__main__':
             print "%s (%d files)%s" % (f._name,f._file_count,
                                        f._is_public and " PUBLIC" or "")
 
-    import optparse,getpass
+    import os.path,optparse,getpass,ConfigParser
 
     parser = optparse.OptionParser(usage="Usage: %prog [options] <args>")
     parser.add_option("--username",
                         help="Minus.com username (required)")
     parser.add_option("--password",
                         help="Minus.com password")
+    parser.add_option("--config",
+                        help="API configuration file",default="~/.minus.conf")
     parser.add_option("--list-folders",action="store_true",
                         help="List remote folders")
     parser.add_option("--put",metavar="FOLDER",
@@ -1165,22 +1185,33 @@ if __name__ == '__main__':
     if options.password is None:
         options.password = getpass.getpass("Minus.com Password: ")
 
-    minus = MinusConnection(options.debug,options.force_https)
-    minus.authenticate(options.username,options.password)
-    user = minus.activeuser()
+    config = ConfigParser.ConfigParser()
 
-    if options.shell:
-        import code
-        code.interact(local=locals())
-    else:
-        cli = MinusCLI()
-        cli.connect(user)
-        if options.list_folders:
-            list_folders(user)
-        elif options.put:
-            put(user,options.put,options.public,args)
-        elif options.get:
-            get(user,options.get,args)
+    try:
+        config.read(os.path.expanduser(options.config))
+        api_key = config.get('api','api_key')
+        api_secret = config.get('api','api_secret')
+
+        minus = MinusConnection(api_key,api_secret,options.debug,options.force_https)
+        minus.authenticate(options.username,options.password)
+        user = minus.activeuser()
+
+        if options.shell:
+            import code
+            code.interact(local=locals())
         else:
-            cli.cmdloop()
+            cli = MinusCLI()
+            cli.connect(user)
+            if options.list_folders:
+                list_folders(user)
+            elif options.put:
+                put(user,options.put,options.public,args)
+            elif options.get:
+                get(user,options.get,args)
+            else:
+                cli.cmdloop()
+
+    except (ConfigParser.NoSectionError,ConfigParser.NoOptionError):
+        print "Invalid Minus.com API configuration file:",options.config
+
 
