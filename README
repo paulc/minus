@@ -31,7 +31,7 @@ number of Python proxy objects:
 
 A simple example of interaction with the API is -
 
-    >>> minus = MinusConnection()        
+    >>> minus = MinusConnection('api_key','api_secret')        
     >>> minus.authenticate('user','password')
     >>> user = minus.activeuser() 
     >>> print [ f._name for f in user.folders() ]
@@ -134,6 +134,22 @@ a simple way of uploading/downloading content - eg.
 
     (You can specify the password on the command-line however note that this 
     will be visible in process args - if not specified will be prompted)
+
+API Key
+-------
+
+You must have a valid Minus.com API_KEY/API_SECRET to use the library (see
+http://minus.com/pages/api to request an API key). These are normally
+passed into the MinusConnection constructor.
+
+To use the CLI client the API_KEY/API_SECRET should be placed in a config
+file (by default ~/.minus.conf - can be changed using the --config flag).
+The file is in '.ini' format and contains a single [api] section with
+api_key and api_secret keys:
+
+    [api]
+    api_key: ...
+    api_secret: ...
 
 Debugging/Development
 ---------------------
