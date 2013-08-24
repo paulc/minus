@@ -16,7 +16,7 @@ class GenerateReadme(Command):
 
 setup(name='minus',
       version = version,
-      description = 'Python library & command-line utility which interacts with the minus.com (http://minus.com) file sharing service',
+      description = 'Python library & command-line utility which interacts with the minus.com (http://minus.com) file sharing service *** Note: This no longer works due to changes in the service ***',
       long_description = long_description,
       author = 'Paul Chakravarti',
       author_email = 'paul.chakravarti@gmail.com',

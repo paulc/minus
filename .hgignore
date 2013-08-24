@@ -4,3 +4,6 @@ syntax: glob
 *.pyc
 *~
 .DS_Store
+dist
+build
+MANIFEST

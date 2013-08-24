@@ -4,6 +4,16 @@
 
     minus.py
 
+    ****************************************************************
+    *** Note: This no longer works due to changes in the service ***
+    ****************************************************************
+
+    Minus.com significantly changed their service so that the current 
+    API doesn't work any more (which is a shame). Have left the code
+    up in case anyone is interested (quite a bit could be reused to
+    interface with other file sharing services)
+
+
 
     Introduction
     ------------
