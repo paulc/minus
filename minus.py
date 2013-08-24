@@ -200,7 +200,7 @@
 import cmd,cookielib,fnmatch,glob,json,mimetools,mimetypes,optparse,os,\
        shlex,sys,time,types,urllib,urllib2
 
-VERSION = '1.1'
+VERSION = '1.2'
 
 DEFAULT_SCOPE = 'read_public read_all upload_new modify_all modify_user'
 
