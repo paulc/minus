@@ -1,6 +1,13 @@
 
 
 minus.py
+--------
+
+***
+*** NOTE: This library doesn't work anymore due to changes in the service. 
+***       For historic interest only (some of the code & design patterns
+***       might be reusable)
+***
 
 
 Introduction
